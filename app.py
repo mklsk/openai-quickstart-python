@@ -1,103 +1,65 @@
 import os
 
 import openai
+import time
 import pandas as pd
 from flask import Flask, redirect, render_template, request, url_for
 from bs4 import BeautifulSoup
 
-# import xml.etree.ElementTree as ET
-#
-# from lxml import etree
-
-# root = etree.Element("root")
-# print(root.tag)
-
-# tree = etree.parse("data/blog_template.xml")
-
-# ET.register_namespace('excerpt', 'http://wordpress.org/export/1.2/excerpt/')
-# ET.register_namespace('content', 'http://purl.org/rss/1.0/modules/content/')
-# ET.register_namespace('wfw', 'http://wellformedweb.org/CommentAPI/')
-# ET.register_namespace('dc', 'http://purl.org/dc/elements/1.1/')
-# ET.register_namespace('wp', 'http://wordpress.org/export/1.2/')
-
-# tree = ET.parse('data/blog_template.xml')
-# root = tree.getroot()
-
-# channel_tag = root.find("./channel")
-# item_tag = channel_tag.find('./item')
-# item_tag_string = ET.tostring(item_tag, encoding='utf8', method='xml')
-# channel_tag.remove(item_tag)
-
 app = Flask(__name__)
-openai.api_key = "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"
+openai.api_key = "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"
 
-df_source = pd.read_csv('data/blog_table_updated.csv')
-df_source = df_source.reset_index()
-df = df_source.truncate(0,29)
+@app.route('/create', methods=['GET'])
+def create_articles():
 
-for idx, row in df.iterrows():
+    args = request.args
+    slice_start = args.get('start')
+    slice_end = args.get('end')
 
-    openai_prompt = row['Open API Query']
+    df_source = pd.read_csv('data/source/blog_source_27122022.csv')
+    df_source = df_source.reset_index()
+    df = df_source.truncate(slice_start,slice_end)
 
-    response = openai.Completion.create(
-    model="text-davinci-003",
-    prompt=openai_prompt,
-    temperature=0.6,
-    max_tokens=3700,
-    )
+    for idx, row in df.iterrows():
 
-#     blog_post_title = row['Title']
-    blog_post_content = response.choices[0].text.replace("\n", "")
-#     blog_post_category = 'Misc'
+        print('[LOG] processing row with index ' + str(idx))
+        start_time = time.time()
 
-    html = blog_post_content
-    parsed_html = BeautifulSoup(html)
-#     print(parsed_html.body.find('h1').text)
-#     print(parsed_html.body.find('p').text)
+        openai_prompt = row['API Request']
 
-    print('open ai response received for prompt: ' + openai_prompt)
-    print('Response: ' + blog_post_content)
-    df.at[idx, 'API Output'] = blog_post_content
+        attempts = 0
+        while attempts < 3:
+            try:
+                response = openai.Completion.create(
+                model="text-davinci-003",
+                prompt=openai_prompt,
+                temperature=0.6,
+                max_tokens=3700,
+                )
+                break
+            except Exception as e:
+                attempts += 1
+                print('[ERROR] Error while performing Open AI request:')
+                print(e)
 
-    df.at[idx, 'Title'] = parsed_html.body.find('h1').text
-    df.at[idx, 'Meta Title'] = parsed_html.body.find('h1').text
+        openai_finish_time = time.time()
+        print('[LOG] fetched OpenAI response in: ' + str(openai_finish_time - start_time))
 
-    df.at[idx, 'Description'] = parsed_html.body.find('p').text
-    df.at[idx, 'Meta Description'] = parsed_html.body.find('p').text
+        blog_post_content = response.choices[0].text.replace("\n", "")
+        parsed_html = BeautifulSoup(blog_post_content)
 
-#     new_blog_item_tag = ET.fromstring(item_tag_string)
-#     content_tag = new_blog_item_tag.find("./{http://purl.org/rss/1.0/modules/content/}encoded")
-#     title_tag = new_blog_item_tag.find("./title")
-#     category_tag = new_blog_item_tag.find("./category")
+        parse_html_finish_time = time.time()
+        print('[LOG] parsed html in: ' + str(parse_html_finish_time - openai_finish_time))
 
-#     title_tag.text = blog_post_title
-#     content_tag.text = blog_post_content
-#     category_tag.text = blog_post_category
-#     category_tag.set('nicename', blog_post_category.lower())
+        df.at[idx, 'Output'] = blog_post_content
+        df.at[idx, 'Post title'] = parsed_html.body.find('h1').text
+        df.at[idx, 'Post SEO title'] = parsed_html.body.find('h1').text
 
-#     channel_tag.append(new_blog_item_tag)
+        df.at[idx, 'Description'] = parsed_html.body.find('p').text
+        df.at[idx, 'Meta Description'] = parsed_html.body.find('p').text
 
-# tree.write('data/test.xml')
-df.to_csv('data/out.csv')
-raise RuntimeError('Silly way to finish')
+        set_csv_field_finish_time = time.time()
+        print('[LOG] set csv fields in: ' + str(set_csv_field_finish_time - parse_html_finish_time))
 
-
-# @app.route("/", methods=("GET", "POST"))
-# def index():
-
-#     if request.method == "POST":
-#         response = openai.Completion.create(
-#             model="text-davinci-002",
-#             prompt=request_string,
-#             temperature=0.6,
-#             max_tokens=1000,
-#         )
-
-#         competion_result = response.choices[0].text.replace("\n", "")
-
-#         print(competion_result)
-    
-#         return redirect(url_for("index", result=competion_result))
-
-#     result = request.args.get("result")
-#     return render_template("index.html", result=result)
+    df.to_csv('data/out/' + str(time.time()) + '.csv')
+    return 'File saved'
